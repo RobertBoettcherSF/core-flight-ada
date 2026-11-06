@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Core Flight Ada</title>
+<style>
+  :root { --bg:#0b1020; --panel:#141c33; --ink:#e8eefc; --muted:#9aa7c7; --accent:#6ea8fe; --ok:#5ddea0; --warn:#ffb454; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:12px; align-items:center; padding:10px 14px; background:#0008; border-bottom:1px solid #223; }
+  header .ver { margin-left:auto; opacity:.7; font-variant-numeric:tabular-nums; }
+  button, select { background:#1c2744; color:var(--ink); border:1px solid #334; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  #splash, #console { min-height: calc(100vh - 48px); }
+  #splash { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:16px; }
+  #viz { width:min(960px,96vw); height:auto; image-rendering:pixelated; background:#000; border:1px solid #223; border-radius:8px; }
+  #splash .hint { color:var(--muted); }
+  #settings { position:fixed; top:56px; left:12px; background:var(--panel); padding:12px; border:1px solid #334; border-radius:8px; display:none; z-index:5; }
+  #console { display:none; padding:16px; max-width:1100px; margin:0 auto; }
+  .grid { display:grid; grid-template-columns:1.2fr .8fr; gap:14px; }
+  @media (max-width:800px){ .grid{grid-template-columns:1fr;} }
+  .card { background:var(--panel); border:1px solid #223; border-radius:10px; padding:12px 14px; }
+  .card h2 { margin:0 0 8px; font-size:15px; color:var(--accent); font-weight:600; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0; }
+  #eventLog { height:220px; overflow:auto; font:12px/1.4 ui-monospace,monospace; background:#0a0f1c; padding:8px; border-radius:6px; }
+  .demo { color:var(--warn); font-size:12px; }
+  .status-ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <strong>Core Flight Ada</strong>
+  <span id="screenLabel">Splash</span>
+  <button type="button" id="btnSettings">Settings</button>
+  <button type="button" id="btnDebug" title="F9">Debug</button>
+  <span class="ver">v<span id="verStamp">…</span></span>
+</header>
+<div id="settings">
+  <label>Language
+    <select id="lang">
+      <option value="en">English</option>
+      <option value="de">Deutsch</option>
+    </select>
+  </label>
+  <p class="hint" style="color:var(--muted);max-width:220px;margin:8px 0 0;font-size:12px;">Changing language reloads once and skips the splash for this session.</p>
+</div>
+<section id="splash">
+  <canvas id="viz" width="240" height="160"></canvas>
+  <div class="row">
+    <span id="sceneName">…</span>
+    <button type="button" id="btnEnter">Enter console</button>
+    <button type="button" id="btnSkip">Skip splash</button>
+  </div>
+  <p class="hint">Ada draws the splash. Press Enter or Skip. Space cycles scenes.</p>
+</section>
+<section id="console">
+  <p class="demo">Demonstration data — not a flight load. Not affiliated with NASA.</p>
+  <div class="grid">
+    <div class="card">
+      <h2>Mission</h2>
+      <div class="row">Status: <span id="conn" class="status-ok">local / connected</span></div>
+      <div class="row">Run level: <span id="runLevel">…</span></div>
+      <div class="row">Mission time: <span id="missionMs">0</span> ms</div>
+      <div class="row">Monotonic tick: <span id="tickCount">0</span></div>
+      <div class="row">
+        <button type="button" id="btnNoop">NOOP</button>
+        <button type="button" id="btnSample">Sample cmd</button>
+      </div>
+      <div class="row">NOOP count: <span id="noop">0</span> &nbsp; Sample count: <span id="sample">0</span></div>
+    </div>
+    <div class="card">
+      <h2>Apps</h2>
+      <div id="appList"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h2>Tables</h2>
+      <p class="demo" style="margin-top:0">Read-only view from Ada (Cfa.Tables). Validation stays in Ada.</p>
+      <div id="tableList" style="font:12px/1.45 ui-monospace,monospace;overflow:auto"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h2>Event log</h2>
+      <div id="eventLog"></div>
+    </div>
+  </div>
+</section>
+<script>
+"use strict";
+const VERSION = "0.10.0";
+const WASM_B64 = "__WASM_BASE64__";
+const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski"];
+const APP_KIND = ["scheduler","cmd ingest","tlm output","sample"];
+const SEV = ["INFO","ERROR","OVERFLOW"];
+const params = new URLSearchParams(location.search);
+const pageV = params.get("v") || "10";
+
+let ada, screen = "splash", scene = 0, raf = 0, lastTick = 0;
+const viz = document.getElementById("viz");
+const ctx = viz.getContext("2d");
+
+function verFromAda() {
+  const n = ada.cfa_version_len();
+  let s = "";
+  for (let i = 1; i <= n; i++) s += String.fromCharCode(ada.cfa_version_byte(i));
+  return s;
+}
+function setScreen(name) {
+  screen = name;
+  document.getElementById("splash").style.display = name === "splash" ? "flex" : "none";
+  document.getElementById("console").style.display = name === "console" ? "block" : "none";
+  document.getElementById("screenLabel").textContent = name === "splash" ? "Splash" : "Console";
+}
+function enterConsole() {
+  setScreen("console");
+  refreshConsole();
+}
+function cycleScene() {
+  scene = (scene + 1) % ada.cfa_viz_scene_count();
+  ada.cfa_viz_start(scene, (Math.random() * 2**32) >>> 0);
+  document.getElementById("sceneName").textContent = SCENES[scene] || ("scene " + scene);
+}
+function blit() {
+  ada.cfa_viz_tick();
+  const w = ada.cfa_viz_width(), h = ada.cfa_viz_height();
+  if (viz.width !== w || viz.height !== h) { viz.width = w; viz.height = h; }
+  const img = new ImageData(new Uint8ClampedArray(ada.memory.buffer, ada.cfa_viz_frame(), w * h * 4), w, h);
+  ctx.putImageData(img, 0, 0);
+}
+
+function adaStr(lenFn, byteFn, ...args) {
+  const n = lenFn(...args);
+  let s = "";
+  for (let o = 1; o <= n; o++) s += String.fromCharCode(byteFn(...args, o));
+  return s;
+}
+function refreshTables() {
+  const blocks = [];
+  const tc = ada.cfa_table_count();
+  for (let ti = 1; ti <= tc; ti++) {
+    const name = adaStr(ada.cfa_table_name_len, ada.cfa_table_name_byte, ti);
+    const rows = ada.cfa_table_rows(ti);
+    const cols = ada.cfa_table_cols(ti);
+    const headers = [];
+    for (let c = 1; c <= cols; c++) {
+      headers.push(adaStr(ada.cfa_table_col_name_len, ada.cfa_table_col_name_byte, ti, c));
+    }
+    let html = `<div style="margin:0 0 10px"><strong>${name}</strong> (${rows}×${cols})`;
+    html += `<table style="border-collapse:collapse;margin-top:4px"><thead><tr>`;
+    for (const h of headers) html += `<th style="text-align:left;padding:2px 8px;border-bottom:1px solid #334;color:var(--muted)">${h}</th>`;
+    html += `</tr></thead><tbody>`;
+    for (let r = 1; r <= rows; r++) {
+      html += `<tr>`;
+      for (let c = 1; c <= cols; c++) {
+        html += `<td style="padding:2px 8px;border-bottom:1px solid #1a2238">${ada.cfa_table_cell(ti, r, c)}</td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table></div>`;
+    blocks.push(html);
+  }
+  document.getElementById("tableList").innerHTML = blocks.join("") || "(no tables)";
+}
+
+function refreshConsole() {
+  document.getElementById("missionMs").textContent = String(ada.cfa_mission_ms());
+  document.getElementById("tickCount").textContent = String(ada.cfa_tick_count());
+  document.getElementById("runLevel").textContent = ["Off","Startup","Operational"][ada.cfa_run_level()] || String(ada.cfa_run_level());
+  document.getElementById("noop").textContent = String(ada.cfa_noop_count());
+  document.getElementById("sample").textContent = String(ada.cfa_sample_count());
+  const apps = [];
+  const n = ada.cfa_app_count();
+  for (let i = 1; i <= n; i++) {
+    apps.push(`#${i} ${APP_KIND[ada.cfa_app_kind(i)] || "?"} runs=${ada.cfa_app_runs(i)}`);
+  }
+  document.getElementById("appList").innerHTML = apps.map(a => `<div>${a}</div>`).join("");
+  const lines = [];
+  const ec = ada.cfa_event_count();
+  for (let i = Math.max(1, ec - 24); i <= ec; i++) {
+    let t = "";
+    const len = ada.cfa_event_text_len(i);
+    for (let o = 1; o <= len; o++) t += String.fromCharCode(ada.cfa_event_text_byte(i, o));
+    lines.push(`[${SEV[ada.cfa_event_sev(i)]||"?"}] app=${ada.cfa_event_app(i)} ${t}`);
+  }
+  document.getElementById("eventLog").textContent = lines.join("\n") || "(empty)";
+  refreshTables();
+}
+function loop(ts) {
+  raf = requestAnimationFrame(loop);
+  if (screen === "splash") {
+    if (ts - lastTick > 40) { blit(); lastTick = ts; }
+    // Keep the executive warm so the console already has demo flow.
+    if ((ts / 500 | 0) !== ((lastTick / 500) | 0)) ada.cfa_tick(ts >>> 0);
+  } else {
+    if (ts - lastTick > 200) {
+      ada.cfa_tick(ts >>> 0);
+      refreshConsole();
+      lastTick = ts;
+    }
+  }
+}
+function downloadFeedback() {
+  const events = [];
+  const ec = ada.cfa_event_count();
+  for (let i = 1; i <= ec; i++) {
+    let t = "";
+    const len = ada.cfa_event_text_len(i);
+    for (let o = 1; o <= len; o++) t += String.fromCharCode(ada.cfa_event_text_byte(i, o));
+    events.push({sev: SEV[ada.cfa_event_sev(i)], app: ada.cfa_event_app(i), text: t});
+  }
+  const payload = {
+    version: VERSION,
+    pageV,
+    screen,
+    language: document.getElementById("lang").value,
+    scene,
+    mission_ms: ada.cfa_mission_ms(),
+    tick: ada.cfa_tick_count(),
+    noop: ada.cfa_noop_count(),
+    sample: ada.cfa_sample_count(),
+    events,
+    note: "Core Flight Ada feedback — no secrets"
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "cfa-feedback-" + VERSION + ".json";
+  a.click();
+}
+
+document.getElementById("btnEnter").onclick = enterConsole;
+document.getElementById("btnSkip").onclick = enterConsole;
+document.getElementById("btnSettings").onclick = () => {
+  const p = document.getElementById("settings");
+  p.style.display = p.style.display === "block" ? "none" : "block";
+};
+document.getElementById("lang").onchange = () => {
+  sessionStorage.setItem("cfa_skip_splash_once", "1");
+  location.reload();
+};
+document.getElementById("btnNoop").onclick = () => { ada.cfa_accept_command(0); ada.cfa_tick(performance.now() >>> 0); refreshConsole(); };
+document.getElementById("btnSample").onclick = () => { ada.cfa_accept_command(1); ada.cfa_tick(performance.now() >>> 0); refreshConsole(); };
+document.getElementById("btnDebug").onclick = downloadFeedback;
+window.addEventListener("keydown", e => {
+  if (e.key === "Enter" && screen === "splash") enterConsole();
+  if (e.key === " " && screen === "splash") { e.preventDefault(); cycleScene(); }
+  if (e.key === "F9") { e.preventDefault(); downloadFeedback(); }
+});
+
+WebAssembly.instantiate(Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0))).then(r => {
+  ada = r.instance.exports;
+  ada.cfa_init();
+  const stamp = verFromAda();
+  document.getElementById("verStamp").textContent = stamp;
+  if (stamp !== VERSION) console.error("version mismatch", stamp, VERSION);
+  cycleScene();
+  if (sessionStorage.getItem("cfa_skip_splash_once") === "1") {
+    sessionStorage.removeItem("cfa_skip_splash_once");
+    enterConsole();
+  } else {
+    setScreen("splash");
+  }
+  requestAnimationFrame(loop);
+}).catch(err => {
+  document.body.innerHTML = "<pre style='padding:20px;color:#f88'>Failed to load Ada WASM.\n" + err + "</pre>";
+});
+</script>
+</body>
+</html>
