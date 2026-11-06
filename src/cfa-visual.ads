@@ -14,7 +14,7 @@ package Cfa.Visual is
 
    subtype Scene_Id is Natural range 0 .. Scene_Count - 1;
    --  0 Rule 30, 1 Game of Life, 2 Field lines, 3 Lorenz, 4 Sierpinski,
-   --  5 Growth Tree
+   --  5 Crystal Diffraction
 
    subtype Pixel is Interfaces.Unsigned_32;  --  AABBGGRR canvas order
    type Pixel_Array is array (0 .. Max_W * Max_H - 1) of Pixel;

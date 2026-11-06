@@ -9,9 +9,9 @@ and not a certified flight load.
 
 ## Try the page
 
-Version **0.10.2**. Open the splash and console here:
+Version **0.10.3**. Open the splash and console here:
 
-[https://raw.githack.com/RobertBoettcherSF/core-flight-ada/main/dist/index.html?v=12](https://raw.githack.com/RobertBoettcherSF/core-flight-ada/main/dist/index.html?v=12)
+[https://raw.githack.com/RobertBoettcherSF/core-flight-ada/main/dist/index.html?v=13](https://raw.githack.com/RobertBoettcherSF/core-flight-ada/main/dist/index.html?v=13)
 
 JavaScript only draws the frames, handles menus and splash timing, and
 downloads a feedback file. The flight loop and splash math run in Ada

@@ -9,7 +9,7 @@ with System;
 
 package Cfa.Api is
 
-   Version_String : constant String := "0.10.2";
+   Version_String : constant String := "0.10.3";
 
    procedure Init
      with Export, Convention => C, External_Name => "cfa_init";

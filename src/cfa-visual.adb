@@ -384,81 +384,196 @@ package body Cfa.Visual is
    end Tick_Sierpinski;
 
 
-   Tree_Depth : Natural := 1;
 
-   procedure Draw_Line (X0, Y0, X1, Y1 : Integer; C : Pixel) is
-      X : Integer := X0;
-      Y : Integer := Y0;
-      Dx : constant Integer := abs (X1 - X0);
-      Dy : constant Integer := abs (Y1 - Y0);
-      Sx : constant Integer := (if X0 < X1 then 1 else -1);
-      Sy : constant Integer := (if Y0 < Y1 then 1 else -1);
-      Err : Integer := Dx - Dy;
-      E2 : Integer;
+   --  Crystal Diffraction, ported from the Symmetry Visualizations Growth
+   --  page (SV.Crystal): breathing circles, a turning node network, and
+   --  pulses on loops through the centre.
+   Crystal_Breath, Crystal_Breath_Speed : Float := 0.0;
+   Crystal_Net, Crystal_Net_Speed       : Float := 0.0;
+   Crystal_Pulse, Crystal_Pulse_Speed   : Float := 0.0;
+   Crystal_Ink                          : Pixel := 0;
+   Crystal_Rings                        : constant Positive := 6;
+   Crystal_Hue                          : constant := 0;  --  0 = pale (original default)
+
+   Pi_C : constant Float := 3.14159_26535_89793;
+
+   type Vec is record
+      X, Y : Float;
+   end record;
+
+   function "+" (A, B : Vec) return Vec is ((A.X + B.X, A.Y + B.Y));
+   function "-" (A, B : Vec) return Vec is ((A.X - B.X, A.Y - B.Y));
+   function "*" (S : Float; A : Vec) return Vec is ((S * A.X, S * A.Y));
+   function Dot_V (A, B : Vec) return Float is (A.X * B.X + A.Y * B.Y);
+   function Len2 (A : Vec) return Float is (Dot_V (A, A));
+
+   function Floor_F (F : Float) return Float is
+     (Float (Integer (F)) - (if Float (Integer (F)) > F then 1.0 else 0.0));
+   function Frac (F : Float) return Float is (F - Floor_F (F));
+
+   function Dir (T : Float) return Vec is
+     ((Float_Cos (T), Float_Sin (T)));
+
+   function Hue_Full (Hue : Natural) return Pixel is
+      F    : constant Unsigned_32 := Unsigned_32 (Hue mod 60) * 255 / 60;
+      R, G, B : Unsigned_32;
    begin
+      case (Hue mod 360) / 60 is
+         when 0      => R := 255;     G := F;       B := 0;
+         when 1      => R := 255 - F; G := 255;     B := 0;
+         when 2      => R := 0;       G := 255;     B := F;
+         when 3      => R := 0;       G := 255 - F; B := 255;
+         when 4      => R := F;       G := 0;       B := 255;
+         when others => R := 255;     G := 0;       B := 255 - F;
+      end case;
+      return 16#FF000000# or Shift_Left (B, 16) or Shift_Left (G, 8) or R;
+   end Hue_Full;
+
+   function Dim (C : Pixel; B : Float) return Pixel is
+      F : constant Unsigned_32 :=
+        Unsigned_32 (Float'Max (0.0, Float'Min (1.0, B)) * 255.0);
+   begin
+      return 16#FF000000#
+        or Shift_Right ((C and 16#FF#) * F, 8)
+        or (Shift_Right ((C and 16#FF00#) * F, 8) and 16#FF00#)
+        or (Shift_Right ((C and 16#FF0000#) * F, 8) and 16#FF0000#);
+   end Dim;
+
+   function Crystal_Speed (Low : Float) return Float is
+     (Low * (1.0 + Float (Rand (100)) / 100.0));
+
+   procedure Stroke (A, B : Vec; WA, WB : Float; C : Pixel) is
+      AB : constant Vec := B - A;
+      L2 : constant Float := Len2 (AB) + 1.0E-6;
+      R  : constant Float := Float'Max (WA, WB) / 2.0 + 1.0;
+      P  : Vec;
+      T, H : Float;
+   begin
+      for Y in Integer'Max (0, Integer (Float'Min (A.Y, B.Y) - R)) ..
+               Integer'Min (Integer (Height) - 1, Integer (Float'Max (A.Y, B.Y) + R))
       loop
-         if X >= 0 and then Y >= 0 then
-            Put (Natural (X), Natural (Y), C);
-         end if;
-         exit when X = X1 and then Y = Y1;
-         E2 := 2 * Err;
-         if E2 > -Dy then
-            Err := Err - Dy;
-            X := X + Sx;
-         end if;
-         if E2 < Dx then
-            Err := Err + Dx;
-            Y := Y + Sy;
+         for X in Integer'Max (0, Integer (Float'Min (A.X, B.X) - R)) ..
+                  Integer'Min (Integer (Width) - 1, Integer (Float'Max (A.X, B.X) + R))
+         loop
+            P := Vec'(Float (X) + 0.5, Float (Y) + 0.5) - A;
+            T := Dot_V (P, AB) / L2;
+            H := (WA + T * (WB - WA)) / 2.0;
+            if T in 0.0 .. 1.0 and then Len2 (P - T * AB) <= H * H then
+               Put (X, Y, C);
+            end if;
+         end loop;
+      end loop;
+   end Stroke;
+
+   procedure Line_V (A, B : Vec; C : Pixel) is
+      Dist : Float := abs (B.X - A.X) + abs (B.Y - A.Y);
+      N    : Natural;
+      P    : Vec;
+   begin
+      if Dist < 1.0 then
+         Dist := 1.0;
+      end if;
+      N := Natural (Dist);
+      for I in 0 .. N loop
+         P := A + (Float (I) / Float (N + 1)) * (B - A);
+         if P.X >= 0.0 and then P.Y >= 0.0
+           and then P.X < Float (Width) and then P.Y < Float (Height)
+         then
+            Put (Natural (Floor_F (P.X)), Natural (Floor_F (P.Y)), C);
          end if;
       end loop;
-   end Draw_Line;
+   end Line_V;
 
-   procedure Branch
-     (X, Y       : Integer;
-      Angle_Deg  : Float;
-      Len        : Natural;
-      Depth_Left : Natural)
-   is
-      Rad : constant Float := Angle_Deg * 3.14159265 / 180.0;
-      X2  : constant Integer := X + Integer (Float (Len) * Float_Cos (Rad));
-      Y2  : constant Integer := Y - Integer (Float (Len) * Float_Sin (Rad));
-      Next_Len : Natural;
-      Hue_Off  : constant Natural := (7 - Depth_Left) * 12;
+   procedure Circle_V (Centre : Vec; R : Float; C : Pixel) is
+      Steps : constant Positive := Natural (2.0 * Pi_C * abs (R)) + 8;
+      P     : Vec;
+      T     : Float;
    begin
-      Draw_Line (X, Y, X2, Y2, Hue (35 + Hue_Off));
-      if Depth_Left = 0 or else Len < 3 then
-         return;
-      end if;
-      Next_Len := (Len * 2) / 3;
-      if Next_Len < 2 then
-         Next_Len := 2;
-      end if;
-      Branch (X2, Y2, Angle_Deg + 26.0, Next_Len, Depth_Left - 1);
-      Branch (X2, Y2, Angle_Deg - 24.0, Next_Len, Depth_Left - 1);
-   end Branch;
+      for I in 0 .. Steps loop
+         T := 2.0 * Pi_C * Float (I) / Float (Steps);
+         P := Centre + (R * Dir (T));
+         if P.X >= 0.0 and then P.Y >= 0.0
+           and then P.X < Float (Width) and then P.Y < Float (Height)
+         then
+            Put (Natural (Floor_F (P.X)), Natural (Floor_F (P.Y)), C);
+         end if;
+      end loop;
+   end Circle_V;
 
    procedure Start_Tree is
    begin
-      Tree_Depth := 1;
-      Clear (16#FF101018#);
+      Crystal_Ink          :=
+        (if Crystal_Hue = 0 then 16#FFF0F0F0# else Hue_Full (Crystal_Hue));
+      Crystal_Breath       := 0.0;
+      Crystal_Breath_Speed := Crystal_Speed (0.02);
+      Crystal_Net          := 0.0;
+      Crystal_Net_Speed    := Crystal_Speed (0.002)
+        * (if Rand (2) = 0 then 1.0 else -1.0);
+      Crystal_Pulse        := 0.0;
+      Crystal_Pulse_Speed  := Crystal_Speed (0.015);
+      Clear (16#FF101010#);
    end Start_Tree;
 
    procedure Tick_Tree is
-      Sway : constant Float := 9.0 * Float_Sin (Float (Step) * 0.04);
-      Trunk : constant Natural := (Height * 2) / 5;
+      S     : constant Float := Float (Natural'Min (Width, Height));
+      C     : constant Vec := (Float (Width) / 2.0, Float (Height) / 2.0);
+      Rings : constant Positive := Crystal_Rings;
+      Faint : constant Pixel := Dim (Crystal_Ink, 0.6);
+
+      function Node (Ring, K : Natural) return Vec is
+         N : constant Positive := 4 * (Ring + 2);
+         T : constant Float := (if Ring mod 2 = 0 then Crystal_Net else -Crystal_Net);
+      begin
+         return C + (S * (0.1 + 0.3 * Float (Ring) / Float (Rings))) *
+           Dir (2.0 * Pi_C * Float (K) / Float (N) + T);
+      end Node;
+
+      A, B, U : Vec;
+      Loop_R  : Float;
    begin
-      Clear (16#FF101018#);
-      Branch
-        (Integer (Width / 2),
-         Integer (Height) - 3,
-         90.0 + Sway,
-         Trunk,
-         Tree_Depth);
-      if Tree_Depth < 7 and then Step mod 14 = 0 then
-         Tree_Depth := Tree_Depth + 1;
-      elsif Tree_Depth >= 7 and then Step mod 220 = 0 then
-         Tree_Depth := 1;
-      end if;
+      Crystal_Breath := Crystal_Breath + Crystal_Breath_Speed;
+      Crystal_Net    := Crystal_Net + Crystal_Net_Speed;
+      Crystal_Pulse  := Frac (Crystal_Pulse + Crystal_Pulse_Speed);
+      Clear (16#FF101010#);
+
+      for K in 0 .. 3 loop
+         U := Dir (Pi_C / 2.0 * Float (K));
+         Circle_V
+           (C + (S * (0.19 + 0.02 * Dir (Crystal_Breath).X)) * U,
+            S * (0.26 + 0.02 * Dir (Crystal_Breath).Y),
+            Crystal_Ink);
+      end loop;
+
+      for K in 0 .. 3 loop
+         U := Dir (Pi_C / 4.0 + Pi_C / 2.0 * Float (K));
+         for L in 1 .. 6 loop
+            Loop_R := S * 0.03 * Float (L);
+            Circle_V (C + Loop_R * U, Loop_R, Faint);
+            A := C + Loop_R * U + Loop_R * Dir
+              (Pi_C / 4.0 + Pi_C / 2.0 * Float (K) + Pi_C
+               + 2.0 * Pi_C * Frac (Crystal_Pulse + 0.13 * Float (L)));
+            Stroke (A, A, 5.0, 5.0, Crystal_Ink);
+         end loop;
+      end loop;
+
+      for Ring in 0 .. Rings loop
+         for K in 0 .. 4 * (Ring + 2) - 1 loop
+            A := Node (Ring, K);
+            Line_V (A, Node (Ring, K + 1), Faint);
+            if Ring < Rings then
+               B := Node (Ring + 1, 0);
+               for J in 1 .. 4 * (Ring + 3) - 1 loop
+                  if Len2 (Node (Ring + 1, J) - A) < Len2 (B - A) then
+                     B := Node (Ring + 1, J);
+                  end if;
+               end loop;
+               Line_V (A, B, Faint);
+            end if;
+         end loop;
+         for K in 0 .. 4 * (Ring + 2) - 1 loop
+            Circle_V (Node (Ring, K), S * 0.008 + 1.5, Crystal_Ink);
+         end loop;
+      end loop;
    end Tick_Tree;
 
    procedure Start (Scene : Scene_Id; Seed : Unsigned_32) is
@@ -501,7 +616,7 @@ package body Cfa.Visual is
          when 2 => return 11;
          when 3 => return 6;
          when 4 => return 10;
-         when 5 => return 12;
+         when 5 => return 13;
       end case;
    end Scene_Name_Length;
 
@@ -516,7 +631,7 @@ package body Cfa.Visual is
          2 => "Field lines     ",
          3 => "Lorenz          ",
          4 => "Sierpinski      ",
-         5 => "Growth Tree     ");
+         5 => "Crystal Diff.   ");
    begin
       Length := Scene_Name_Length (Scene);
       Buffer := (others => ' ');

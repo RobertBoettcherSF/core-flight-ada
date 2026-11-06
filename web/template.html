@@ -87,13 +87,13 @@
 </section>
 <script>
 "use strict";
-const VERSION = "0.10.2";
+const VERSION = "0.10.3";
 const WASM_B64 = "__WASM_BASE64__";
-const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski","Growth Tree"];
+const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski","Crystal Diffraction"];
 const APP_KIND = ["scheduler","cmd ingest","tlm output","sample"];
 const SEV = ["INFO","ERROR","OVERFLOW"];
 const params = new URLSearchParams(location.search);
-const pageV = params.get("v") || "12";
+const pageV = params.get("v") || "13";
 
 let ada, screen = "splash", scene = 0, raf = 0, lastTick = 0;
 const viz = document.getElementById("viz");
@@ -116,7 +116,7 @@ function enterConsole() {
   refreshConsole();
 }
 function startSplashViz() {
-  scene = 5; // Growth Tree — single splash animation
+  scene = 5; // Crystal Diffraction — single splash animation
   ada.cfa_viz_start(scene, (Math.random() * 2**32) >>> 0);
 }
 function blit() {
