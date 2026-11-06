@@ -383,6 +383,84 @@ package body Cfa.Visual is
       end if;
    end Tick_Sierpinski;
 
+
+   Tree_Depth : Natural := 1;
+
+   procedure Draw_Line (X0, Y0, X1, Y1 : Integer; C : Pixel) is
+      X : Integer := X0;
+      Y : Integer := Y0;
+      Dx : constant Integer := abs (X1 - X0);
+      Dy : constant Integer := abs (Y1 - Y0);
+      Sx : constant Integer := (if X0 < X1 then 1 else -1);
+      Sy : constant Integer := (if Y0 < Y1 then 1 else -1);
+      Err : Integer := Dx - Dy;
+      E2 : Integer;
+   begin
+      loop
+         if X >= 0 and then Y >= 0 then
+            Put (Natural (X), Natural (Y), C);
+         end if;
+         exit when X = X1 and then Y = Y1;
+         E2 := 2 * Err;
+         if E2 > -Dy then
+            Err := Err - Dy;
+            X := X + Sx;
+         end if;
+         if E2 < Dx then
+            Err := Err + Dx;
+            Y := Y + Sy;
+         end if;
+      end loop;
+   end Draw_Line;
+
+   procedure Branch
+     (X, Y       : Integer;
+      Angle_Deg  : Float;
+      Len        : Natural;
+      Depth_Left : Natural)
+   is
+      Rad : constant Float := Angle_Deg * 3.14159265 / 180.0;
+      X2  : constant Integer := X + Integer (Float (Len) * Float_Cos (Rad));
+      Y2  : constant Integer := Y - Integer (Float (Len) * Float_Sin (Rad));
+      Next_Len : Natural;
+      Hue_Off  : constant Natural := (7 - Depth_Left) * 12;
+   begin
+      Draw_Line (X, Y, X2, Y2, Hue (35 + Hue_Off));
+      if Depth_Left = 0 or else Len < 3 then
+         return;
+      end if;
+      Next_Len := (Len * 2) / 3;
+      if Next_Len < 2 then
+         Next_Len := 2;
+      end if;
+      Branch (X2, Y2, Angle_Deg + 26.0, Next_Len, Depth_Left - 1);
+      Branch (X2, Y2, Angle_Deg - 24.0, Next_Len, Depth_Left - 1);
+   end Branch;
+
+   procedure Start_Tree is
+   begin
+      Tree_Depth := 1;
+      Clear (16#FF101018#);
+   end Start_Tree;
+
+   procedure Tick_Tree is
+      Sway : constant Float := 9.0 * Float_Sin (Float (Step) * 0.04);
+      Trunk : constant Natural := (Height * 2) / 5;
+   begin
+      Clear (16#FF101018#);
+      Branch
+        (Integer (Width / 2),
+         Integer (Height) - 3,
+         90.0 + Sway,
+         Trunk,
+         Tree_Depth);
+      if Tree_Depth < 7 and then Step mod 14 = 0 then
+         Tree_Depth := Tree_Depth + 1;
+      elsif Tree_Depth >= 7 and then Step mod 220 = 0 then
+         Tree_Depth := 1;
+      end if;
+   end Tick_Tree;
+
    procedure Start (Scene : Scene_Id; Seed : Unsigned_32) is
    begin
       Active := Scene;
@@ -396,6 +474,7 @@ package body Cfa.Visual is
          when 2 => Start_Field;
          when 3 => Start_Lorenz;
          when 4 => Start_Sierpinski;
+         when 5 => Start_Tree;
       end case;
    end Start;
 
@@ -408,6 +487,7 @@ package body Cfa.Visual is
          when 2 => Tick_Field;
          when 3 => Tick_Lorenz;
          when 4 => Tick_Sierpinski;
+         when 5 => Tick_Tree;
       end case;
    end Tick;
 
@@ -421,6 +501,7 @@ package body Cfa.Visual is
          when 2 => return 11;
          when 3 => return 6;
          when 4 => return 10;
+         when 5 => return 12;
       end case;
    end Scene_Name_Length;
 
@@ -434,7 +515,8 @@ package body Cfa.Visual is
          1 => "Game of Life    ",
          2 => "Field lines     ",
          3 => "Lorenz          ",
-         4 => "Sierpinski      ");
+         4 => "Sierpinski      ",
+         5 => "Growth Tree     ");
    begin
       Length := Scene_Name_Length (Scene);
       Buffer := (others => ' ');
