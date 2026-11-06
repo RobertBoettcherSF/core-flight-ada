@@ -14,6 +14,7 @@
   button:hover { border-color:var(--accent); }
   #splash, #console { min-height: calc(100vh - 48px); }
   #splash { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:16px; }
+  #splashTitle { margin:0; font-size:clamp(28px,5vw,48px); font-weight:650; letter-spacing:.02em; }
   #viz { width:min(960px,96vw); height:auto; image-rendering:pixelated; background:#000; border:1px solid #223; border-radius:8px; }
   #splash .hint { color:var(--muted); }
   #settings { position:fixed; top:56px; left:12px; background:var(--panel); padding:12px; border:1px solid #334; border-radius:8px; display:none; z-index:5; }
@@ -46,13 +47,13 @@
   <p class="hint" style="color:var(--muted);max-width:220px;margin:8px 0 0;font-size:12px;">Changing language reloads once and skips the splash for this session.</p>
 </div>
 <section id="splash">
+  <h1 id="splashTitle">Core Flight Ada</h1>
   <canvas id="viz" width="240" height="160"></canvas>
   <div class="row">
-    <span id="sceneName">…</span>
     <button type="button" id="btnEnter">Enter console</button>
     <button type="button" id="btnSkip">Skip splash</button>
   </div>
-  <p class="hint">Ada draws the splash. Press Enter or Skip. Space cycles scenes.</p>
+  <p class="hint">Ada draws the splash. Press Enter or Skip to open the console.</p>
 </section>
 <section id="console">
   <p class="demo">Demonstration data — not a flight load. Not affiliated with NASA.</p>
@@ -86,13 +87,13 @@
 </section>
 <script>
 "use strict";
-const VERSION = "0.10.0";
+const VERSION = "0.10.1";
 const WASM_B64 = "__WASM_BASE64__";
 const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski"];
 const APP_KIND = ["scheduler","cmd ingest","tlm output","sample"];
 const SEV = ["INFO","ERROR","OVERFLOW"];
 const params = new URLSearchParams(location.search);
-const pageV = params.get("v") || "10";
+const pageV = params.get("v") || "11";
 
 let ada, screen = "splash", scene = 0, raf = 0, lastTick = 0;
 const viz = document.getElementById("viz");
@@ -114,10 +115,9 @@ function enterConsole() {
   setScreen("console");
   refreshConsole();
 }
-function cycleScene() {
-  scene = (scene + 1) % ada.cfa_viz_scene_count();
+function startSplashViz() {
+  scene = 1; // Game of Life — single splash animation
   ada.cfa_viz_start(scene, (Math.random() * 2**32) >>> 0);
-  document.getElementById("sceneName").textContent = SCENES[scene] || ("scene " + scene);
 }
 function blit() {
   ada.cfa_viz_tick();
@@ -242,7 +242,6 @@ document.getElementById("btnSample").onclick = () => { ada.cfa_accept_command(1)
 document.getElementById("btnDebug").onclick = downloadFeedback;
 window.addEventListener("keydown", e => {
   if (e.key === "Enter" && screen === "splash") enterConsole();
-  if (e.key === " " && screen === "splash") { e.preventDefault(); cycleScene(); }
   if (e.key === "F9") { e.preventDefault(); downloadFeedback(); }
 });
 
@@ -252,7 +251,7 @@ WebAssembly.instantiate(Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0))).t
   const stamp = verFromAda();
   document.getElementById("verStamp").textContent = stamp;
   if (stamp !== VERSION) console.error("version mismatch", stamp, VERSION);
-  cycleScene();
+  startSplashViz();
   if (sessionStorage.getItem("cfa_skip_splash_once") === "1") {
     sessionStorage.removeItem("cfa_skip_splash_once");
     enterConsole();
