@@ -15,7 +15,10 @@
   #splash, #console { min-height: calc(100vh - 48px); }
   #splash { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:16px; }
   #splashTitle { margin:0; font-size:clamp(28px,5vw,48px); font-weight:650; letter-spacing:.02em; }
-  #viz { width:min(960px,96vw); height:auto; image-rendering:pixelated; background:#000; border:1px solid #223; border-radius:8px; }
+  #viz { width:min(1100px,96vw); height:auto; image-rendering:auto; background:#000; border:1px solid #223; border-radius:8px; }
+  #consoleViz { width:100%; max-width:640px; height:auto; image-rendering:auto; background:#000; border:1px solid #223; border-radius:8px; }
+  .split { display:grid; grid-template-columns:1fr 1.15fr; gap:14px; align-items:start; }
+  @media (max-width:800px){ .split{grid-template-columns:1fr;} }
   #splash .hint { color:var(--muted); }
   #settings { position:fixed; top:56px; left:12px; background:var(--panel); padding:12px; border:1px solid #334; border-radius:8px; display:none; z-index:5; }
   #console { display:none; padding:16px; max-width:1100px; margin:0 auto; }
@@ -48,7 +51,7 @@
 </div>
 <section id="splash">
   <h1 id="splashTitle">Core Flight Ada</h1>
-  <canvas id="viz" width="240" height="160"></canvas>
+  <canvas id="viz" width="640" height="400"></canvas>
   <div class="row">
     <button type="button" id="btnEnter">Enter console</button>
     <button type="button" id="btnSkip">Skip splash</button>
@@ -74,10 +77,17 @@
       <h2>Apps</h2>
       <div id="appList"></div>
     </div>
-    <div class="card" style="grid-column:1/-1">
-      <h2>Tables</h2>
-      <p class="demo" style="margin-top:0">Read-only view from Ada (Cfa.Tables). Validation stays in Ada.</p>
-      <div id="tableList" style="font:12px/1.45 ui-monospace,monospace;overflow:auto"></div>
+    <div class="card split" style="grid-column:1/-1">
+      <div>
+        <h2>Tables</h2>
+        <p class="demo" style="margin-top:0">Read-only view from Ada (Cfa.Tables). Validation stays in Ada.</p>
+        <div id="tableList" style="font:12px/1.45 ui-monospace,monospace;overflow:auto"></div>
+      </div>
+      <div>
+        <h2>Flight path</h2>
+        <p class="demo" style="margin-top:0">Drawn by Ada — a rocket follows its path, then starts again.</p>
+        <canvas id="consoleViz" width="640" height="400"></canvas>
+      </div>
     </div>
     <div class="card" style="grid-column:1/-1">
       <h2>Event log</h2>
@@ -87,17 +97,19 @@
 </section>
 <script>
 "use strict";
-const VERSION = "0.10.3";
+const VERSION = "0.10.4";
 const WASM_B64 = "__WASM_BASE64__";
-const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski","Crystal Diffraction"];
+const SCENES = ["Rule 30","Game of Life","Field lines","Lorenz","Sierpinski","Crystal Diffraction","Flight path"];
 const APP_KIND = ["scheduler","cmd ingest","tlm output","sample"];
 const SEV = ["INFO","ERROR","OVERFLOW"];
 const params = new URLSearchParams(location.search);
-const pageV = params.get("v") || "13";
+const pageV = params.get("v") || "14";
 
-let ada, screen = "splash", scene = 0, raf = 0, lastTick = 0;
+let ada, screen = "splash", scene = 0, raf = 0, lastTick = 0, lastBlit = 0;
 const viz = document.getElementById("viz");
 const ctx = viz.getContext("2d");
+const consoleViz = document.getElementById("consoleViz");
+const consoleCtx = consoleViz.getContext("2d");
 
 function verFromAda() {
   const n = ada.cfa_version_len();
@@ -113,18 +125,20 @@ function setScreen(name) {
 }
 function enterConsole() {
   setScreen("console");
+  scene = 6; // Flight path — rocket drawn by Ada
+  ada.cfa_viz_start(scene, (Math.random() * 2**32) >>> 0);
   refreshConsole();
 }
 function startSplashViz() {
   scene = 5; // Crystal Diffraction — single splash animation
   ada.cfa_viz_start(scene, (Math.random() * 2**32) >>> 0);
 }
-function blit() {
+function blitTo(canvas, context) {
   ada.cfa_viz_tick();
   const w = ada.cfa_viz_width(), h = ada.cfa_viz_height();
-  if (viz.width !== w || viz.height !== h) { viz.width = w; viz.height = h; }
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   const img = new ImageData(new Uint8ClampedArray(ada.memory.buffer, ada.cfa_viz_frame(), w * h * 4), w, h);
-  ctx.putImageData(img, 0, 0);
+  context.putImageData(img, 0, 0);
 }
 
 function adaStr(lenFn, byteFn, ...args) {
@@ -187,10 +201,11 @@ function refreshConsole() {
 function loop(ts) {
   raf = requestAnimationFrame(loop);
   if (screen === "splash") {
-    if (ts - lastTick > 40) { blit(); lastTick = ts; }
+    if (ts - lastBlit > 40) { blitTo(viz, ctx); lastBlit = ts; }
     // Keep the executive warm so the console already has demo flow.
-    if ((ts / 500 | 0) !== ((lastTick / 500) | 0)) ada.cfa_tick(ts >>> 0);
+    if (ts - lastTick > 500) { ada.cfa_tick(ts >>> 0); lastTick = ts; }
   } else {
+    if (ts - lastBlit > 40) { blitTo(consoleViz, consoleCtx); lastBlit = ts; }
     if (ts - lastTick > 200) {
       ada.cfa_tick(ts >>> 0);
       refreshConsole();

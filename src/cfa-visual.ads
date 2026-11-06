@@ -8,13 +8,13 @@ with System;
 
 package Cfa.Visual is
 
-   Max_W : constant := 240;
-   Max_H : constant := 160;
-   Scene_Count : constant := 6;
+   Max_W : constant := 640;
+   Max_H : constant := 400;
+   Scene_Count : constant := 7;
 
    subtype Scene_Id is Natural range 0 .. Scene_Count - 1;
    --  0 Rule 30, 1 Game of Life, 2 Field lines, 3 Lorenz, 4 Sierpinski,
-   --  5 Crystal Diffraction
+   --  5 Crystal Diffraction, 6 Flight path
 
    subtype Pixel is Interfaces.Unsigned_32;  --  AABBGGRR canvas order
    type Pixel_Array is array (0 .. Max_W * Max_H - 1) of Pixel;

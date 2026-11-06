@@ -576,6 +576,97 @@ package body Cfa.Visual is
       end loop;
    end Tick_Tree;
 
+
+   Flight_T : Float := 0.0;
+
+   function Flight_Path (T : Float) return Vec is
+      X : constant Float := 28.0 + T * (Float (Width) - 56.0);
+      Y : constant Float :=
+        (Float (Height) - 30.0)
+        - Float_Sin (T * Pi_C) * (Float (Height) * 0.62);
+   begin
+      return (X, Y);
+   end Flight_Path;
+
+   procedure Fill_Rows (Y0, Y1 : Natural; C : Pixel) is
+   begin
+      for Y in Y0 .. Y1 loop
+         for X in 0 .. Width - 1 loop
+            Put (X, Y, C);
+         end loop;
+      end loop;
+   end Fill_Rows;
+
+   procedure Start_Flight is
+   begin
+      Flight_T := 0.0;
+      Clear (16#FF281808#);
+   end Start_Flight;
+
+   procedure Tick_Flight is
+      P, Q, Tip, Left, Right, Tail : Vec;
+      DX, DY, H : Float;
+      UX, UY : Float;
+      Dots : Natural;
+      S : Float;
+      Star : Vec;
+   begin
+      Clear (16#FF281808#);
+      --  a few stars
+      for K in 1 .. 18 loop
+         Star :=
+           ((Float ((37 * K) mod (Width - 8)) + 4.0),
+            (Float ((91 * K) mod (Height / 2)) + 6.0));
+         Put (Natural (Floor_F (Star.X)), Natural (Floor_F (Star.Y)), 16#FFD0D0C8#);
+      end loop;
+
+      if Height > 20 then
+         Fill_Rows (Height - 22, Height - 1, 16#FF2A5840#);
+      end if;
+      --  ground line
+      Line_V ((0.0, Float (Height) - 22.0),
+              (Float (Width) - 1.0, Float (Height) - 22.0),
+              16#FF5A8A68#);
+
+      Dots := Natural (Flight_T * Float (Width / 3));
+      if Dots < 2 then
+         Dots := 2;
+      end if;
+      for I in 0 .. Dots loop
+         S := Flight_T * Float (I) / Float (Dots);
+         Q := Flight_Path (S);
+         Circle_V (Q, 1.6, 16#FFE8C070#);
+      end loop;
+
+      P := Flight_Path (Flight_T);
+      Q := Flight_Path (Float'Min (1.0, Flight_T + 0.02));
+      DX := Q.X - P.X;
+      DY := Q.Y - P.Y;
+      H := abs (DX) + abs (DY);
+      if H < 0.001 then
+         H := 0.001;
+      end if;
+      UX := DX / H;
+      UY := DY / H;
+      Tip   := (P.X + UX * 16.0, P.Y + UY * 16.0);
+      Left  := (P.X - UY * 8.0 - UX * 3.0, P.Y + UX * 8.0 - UY * 3.0);
+      Right := (P.X + UY * 8.0 - UX * 3.0, P.Y - UX * 8.0 - UY * 3.0);
+      Tail  := (P.X - UX * 14.0, P.Y - UY * 14.0);
+      Fill_Tri
+        (Integer (Tip.X), Integer (Tip.Y),
+         Integer (Left.X), Integer (Left.Y),
+         Integer (Right.X), Integer (Right.Y),
+         16#FFE8E4DC#);
+      Stroke (P, Tail, 9.0, 6.0, 16#FFC8C0B8#);
+      Stroke (Tail, (Tail.X - UX * 10.0, Tail.Y - UY * 10.0),
+              5.0, 1.0, 16#FF2878FF#);
+
+      Flight_T := Flight_T + 0.006;
+      if Flight_T > 1.0 then
+         Flight_T := 0.0;
+      end if;
+   end Tick_Flight;
+
    procedure Start (Scene : Scene_Id; Seed : Unsigned_32) is
    begin
       Active := Scene;
@@ -590,6 +681,7 @@ package body Cfa.Visual is
          when 3 => Start_Lorenz;
          when 4 => Start_Sierpinski;
          when 5 => Start_Tree;
+         when 6 => Start_Flight;
       end case;
    end Start;
 
@@ -603,6 +695,7 @@ package body Cfa.Visual is
          when 3 => Tick_Lorenz;
          when 4 => Tick_Sierpinski;
          when 5 => Tick_Tree;
+         when 6 => Tick_Flight;
       end case;
    end Tick;
 
@@ -617,6 +710,7 @@ package body Cfa.Visual is
          when 3 => return 6;
          when 4 => return 10;
          when 5 => return 13;
+         when 6 => return 11;
       end case;
    end Scene_Name_Length;
 
@@ -631,7 +725,8 @@ package body Cfa.Visual is
          2 => "Field lines     ",
          3 => "Lorenz          ",
          4 => "Sierpinski      ",
-         5 => "Crystal Diff.   ");
+         5 => "Crystal Diff.   ",
+         6 => "Flight path     ");
    begin
       Length := Scene_Name_Length (Scene);
       Buffer := (others => ' ');
